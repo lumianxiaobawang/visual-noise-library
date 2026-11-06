@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Visual Noise Library · 視覚ノイズ</title>
+<style>
+/* Same structure as the street page: full-bleed point cloud on the left, instrument panel on the right. */
+:root {
+  --bg: #0b0c10; --panel: #111318; --ink: #e8eaf0; --muted: #8a90a0; --rule: #262a33; --blue: #3b6cff; --amber: #f0b429;
+  --f: "Yu Gothic", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif; --mono: ui-monospace, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.6 var(--f); overflow: hidden; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; height: 100%; }
+.stage { position: relative; }
+#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+#cv.drag { cursor: grabbing; }
+.title { position: absolute; left: 28px; top: 22px; pointer-events: none; }
+.title h1 { margin: 0; font: 800 34px/1 "Segoe UI", Arial, sans-serif; color: #f2f4f8; text-shadow: -2px 0 rgba(255, 40, 140, .55), 2px 0 rgba(0, 205, 235, .6); letter-spacing: -.01em; }
+.title p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+.nav { position: absolute; right: 22px; top: 20px; display: flex; gap: 4px; background: rgba(17,19,24,.85); border: 1px solid var(--rule); border-radius: 999px; padding: 3px; }
+.nav a { color: var(--muted); text-decoration: none; font-size: 13px; padding: 5px 12px; border-radius: 999px; }
+.nav a[aria-current] { background: var(--blue); color: #fff; }
+.nav a:hover:not([aria-current]) { color: var(--ink); }
+.hud { position: absolute; left: 28px; bottom: 22px; right: 28px; display: flex; align-items: center; gap: 14px; pointer-events: none; color: var(--muted); font: 12px var(--mono); }
+.track { flex: 1; height: 2px; background: var(--rule); position: relative; }
+.hud #play { pointer-events: auto; flex: none; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--rule); background: #1a1d24; color: var(--ink); cursor: pointer; font-size: 11px; }
+.hud #play:hover { border-color: var(--blue); }
+.hud #speed { pointer-events: auto; background: #1a1d24; color: var(--ink); border: 1px solid var(--rule); border-radius: 6px; padding: 3px 4px; font: 12px var(--mono); }
+.scrub { flex: 1; pointer-events: auto; padding: 12px 0; cursor: pointer; touch-action: none; }
+.scrub .track i { width: 16px; height: 16px; top: -7px; box-shadow: 0 0 0 3px rgba(59, 108, 255, .25); }
+.track i { position: absolute; top: -5px; width: 12px; height: 12px; border-radius: 50%; background: var(--blue); transform: translateX(-50%); }
+.track b { position: absolute; top: -7px; width: 2px; height: 16px; background: rgba(240, 180, 41, .7); }
+.legend { position: absolute; left: 28px; bottom: 52px; display: flex; gap: 12px; font-size: 12px; color: var(--ink); pointer-events: none; }
+.legend i { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+.tip { position: absolute; pointer-events: none; background: rgba(17, 19, 24, .92); border: 1px solid var(--rule); padding: 6px 10px; border-radius: 6px; font-size: 13px; white-space: nowrap; }
+.msg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: 70%; text-align: center; color: var(--muted); font-size: 15px; pointer-events: none; }
+.msg.err { color: #ff8a7a; pointer-events: auto; user-select: text; }
+aside { background: var(--panel); border-left: 1px solid var(--rule); padding: 18px 18px 24px; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; }
+.label { font: 500 11px var(--mono); letter-spacing: .08em; color: var(--muted); text-transform: uppercase; margin: 0 0 8px; }
+.near { display: grid; gap: 6px; }
+.near .bar { height: 10px; border-radius: 5px; background: linear-gradient(90deg, #2a2e38, var(--blue)); position: relative; }
+.near .bar i { position: absolute; top: -3px; width: 4px; height: 16px; background: #fff; border-radius: 2px; transform: translateX(-50%); }
+.near .ends { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+input[type=range] { width: 100%; accent-color: var(--blue); }
+.sl { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center; color: var(--muted); font-size: 12px; }
+.seg { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.seg button { background: #1a1d24; color: var(--ink); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 0; font: 600 13px var(--f); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--blue); border-color: var(--blue); color: #fff; }
+.seg button.wide { grid-column: span 2; font-weight: 400; }
+.list { display: grid; gap: 4px; }
+.list button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: transparent; border: 1px solid transparent; color: var(--ink); padding: 7px 8px; border-radius: 6px; font: 13px var(--f); cursor: pointer; }
+.list button:hover, .list button[aria-current="true"] { background: #1a1d24; border-color: var(--rule); }
+.list button i { width: 14px; height: 14px; border-radius: 50%; flex: none; }
+.list button span { flex: 1; }
+.list button small { color: var(--muted); font: 11px var(--mono); }
+.card { border: 1px solid var(--rule); border-radius: 8px; padding: 12px 14px; display: grid; gap: 6px; min-height: 92px; }
+.card h2 { margin: 0; font-size: 17px; }
+.card p { margin: 0; color: var(--muted); font-size: 13px; }
+.card .key { color: var(--amber); font-size: 13px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.row button { flex: 1; background: #1a1d24; color: var(--ink); border: 1px solid var(--rule); border-radius: 6px; padding: 7px 8px; font: 13px var(--f); cursor: pointer; }
+.row button:hover { border-color: var(--blue); }
+#m-ov[aria-pressed="true"] { background: var(--blue); border-color: var(--blue); color: #fff; }
+.row select { flex: 2; min-width: 0; background: #1a1d24; color: var(--ink); border: 1px solid var(--rule); border-radius: 6px; padding: 6px; font: 12px var(--f); }
+.note { color: var(--muted); font-size: 12px; margin: 0; }
+.cam { display: grid; gap: 8px; }
+#prev { position: static; display: block; width: 100%; height: auto; aspect-ratio: 300 / 170; border-radius: 6px; border: 1px solid var(--rule); background: #000; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+@media (max-width: 860px) { main { grid-template-columns: 1fr; grid-template-rows: 62vh auto; } html, body { overflow: auto; height: auto; } aside { border-left: 0; border-top: 1px solid var(--rule); } }
+</style>
+</head>
+<body>
+<main>
+  <section class="stage" id="stage">
+    <canvas id="cv"></canvas>
+    <div class="title"><h1>VISUAL NOISE · LIBRARY</h1><p>視覚ノイズ · CASE 01 図書館 · 4人が歩いた回廊を一周 · 近づくほど、灰色の背景が散って「目に入る色」だけが残る</p></div>
+    <nav class="nav"><a aria-current="page">CASE 01 図書館</a></nav>
+    <div class="legend" id="legend" hidden></div>
+    <div class="hud"><button id="play" aria-label="再生">▶</button><span id="pos">0 m</span><div class="scrub" id="scrub"><div class="track" id="track"><i id="dot"></i></div></div><span id="len"></span><select id="speed" aria-label="速さ"><option value="0.3">遅い</option><option value="0.6" selected>普通</option><option value="1.2">速い</option></select></div>
+    <div class="tip" id="tip" hidden></div>
+    <div class="msg" id="msg">読み込み中…（点群データ約1 MB・3Dライブラリはネットから）</div>
+  </section>
+  <aside>
+    <div class="near">
+      <p class="label">近さ · Distance</p>
+      <div class="bar"><i id="nearMark"></i></div>
+      <div class="ends"><span>遠い：空間全体</span><span>近い：色だけ</span></div>
+      <input type="range" id="nearIn" min="0" max="1" step="0.01" value="0" aria-label="近さ">
+      <label class="sl">モデルの大きさ <input type="range" id="zoomIn" min="0.5" max="2" step="0.01" value="1" aria-label="モデルの大きさ"></label>
+      <p class="note">ホイール＝近づく／離れる。下のバーをドラッグ＝回廊に沿って移動、▶＝ゆっくり自動で一周。</p>
+    </div>
+    <div>
+      <p class="label">だれの記録 · Scans</p>
+      <div class="seg" id="mem">
+        <button id="m-all" aria-pressed="true" class="wide">全員</button>
+        <button id="m-0" aria-pressed="false">A</button><button id="m-1" aria-pressed="false">B</button>
+        <button id="m-2" aria-pressed="false">C</button><button id="m-3" aria-pressed="false">D</button>
+      </div>
+      <div class="row" style="margin-top:6px"><button id="m-ov" aria-pressed="false">記録の重なり</button></div>
+      <p class="note" id="memNote">4人のスキャンをすべて重ねて表示しています。</p>
+    </div>
+    <div class="cam">
+      <p class="label">カメラ · 手で操作</p>
+      <div class="row"><select id="camSel" aria-label="カメラ"><option value="">カメラを選ぶ</option></select><button id="camBtn">カメラ開始</button></div>
+      <canvas id="prev" width="300" height="170" hidden></canvas>
+      <label class="sl">感度 <input type="range" id="sens" min="0.5" max="2" step="0.05" value="1"></label>
+      <p class="note" id="camMsg">片手：指の開き具合＝広がり具合（つまむ＝収束、開く＝拡散、途中で止めればその大きさ）／横に寄せる＝少し回す。両手：手の間隔＝拡大・縮小／一緒に横へ＝回廊に沿って移動。</p>
+    </div>
+    <div>
+      <p class="label">目に入るもの · Objects</p>
+      <div class="list" id="list"></div>
+    </div>
+    <div class="card" id="card"></div>
+    <div class="row"><button id="all">全体を見る</button><button id="reset">最初に戻る</button></div>
+    <div class="row"><button id="fillBtn" aria-pressed="true">床の補完・平らに：オン</button></div>
+    <p class="note">補完＝スキャンで抜けた床の穴を周りの色から推定して埋め、床の凸凹を平らにしたもの。オフにするとスキャンそのままに戻ります。名前は点群からの読み取り（推定）。位置合わせは近似（各スキャン内部のずれが残る）。</p>
+  </aside>
+</main>
+<script>
+const showErr = (m) => { const el = document.getElementById('msg'); if (el) { el.hidden = false; el.className = 'msg err'; el.textContent = '読み込みに失敗しました：' + m + '　（ページを再読み込みしてください）'; } };
+addEventListener('error', (e) => showErr(e.message || (e.target && e.target.src) || 'script error'), true);
+addEventListener('unhandledrejection', (e) => showErr(e.reason && (e.reason.message || e.reason) || 'unknown'));
+setTimeout(() => { const el = document.getElementById('msg'); if (el && !el.className.includes('err') && !el.hidden) showErr('30秒たっても3D表示が始まりません（ネット接続、またはブラウザのハードウェアアクセラレーションを確認）'); }, 30000);
+</script>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+<script type="module">
+import * as THREE from 'three';
+import { createGestureState, updateGestures, drawPreview } from './gestures.js';
+
+const get = async (u) => { const r = await fetch(u, { cache: 'no-store' }); if (!r.ok) throw new Error(`${u} を読み込めません（${r.status}）`); return r; };
+const meta = await (await get('meta.json')).json();
+const S = meta.stride, LOOP = meta.loop_m, LM = meta.landmarks;
+let seed = 98765; const rand = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 4294967296);
+function parse(buf) {
+  const dv = new DataView(buf), N = Math.floor(buf.byteLength / S);
+  const a = { N, pos: new Float32Array(N * 3), col: new Float32Array(N * 3), kind: new Float32Array(N), info: new Float32Array(N), lm: new Float32Array(N),
+              bits: new Float32Array(N), dz: new Float32Array(N), u: new Float32Array(N), rnd: new Float32Array(N) };
+  for (let i = 0; i < N; i++) {
+    const o = i * S;
+    a.pos[i * 3] = dv.getInt16(o, true) / 100; a.pos[i * 3 + 1] = dv.getInt16(o + 4, true) / 100; a.pos[i * 3 + 2] = -dv.getInt16(o + 2, true) / 100;
+    a.col[i * 3] = dv.getUint8(o + 6) / 255; a.col[i * 3 + 1] = dv.getUint8(o + 7) / 255; a.col[i * 3 + 2] = dv.getUint8(o + 8) / 255;
+    a.kind[i] = dv.getUint8(o + 9); a.info[i] = dv.getUint8(o + 10) / 255; a.lm[i] = dv.getUint8(o + 11); a.bits[i] = dv.getUint8(o + 12);
+    a.dz[i] = dv.getInt16(o + 13, true) / 100; a.u[i] = dv.getUint16(o + 15, true) / 100; a.rnd[i] = rand();
+  }
+  return a;
+}
+const D = parse(await (await get('points.bin')).arrayBuffer());
+const F = parse(await (await get('fill.bin')).arrayBuffer());
+
+// Landmark colours and hover-pick samples.
+const lmCol = LM.map(() => [0, 0, 0, 0]), pick = LM.map(() => []);
+for (let i = 0; i < D.N; i++) { const l = D.lm[i]; if (l === 255) continue; const c = lmCol[l]; c[0] += D.col[i * 3]; c[1] += D.col[i * 3 + 1]; c[2] += D.col[i * 3 + 2]; c[3]++; if (D.rnd[i] < .3) pick[l].push(i); }
+const lmHex = lmCol.map(c => `rgb(${[0, 1, 2].map(k => Math.round(Math.min(1, c[k] / c[3] * 1.15) * 255)).join(',')})`);
+
+const canvas = document.getElementById('cv'), stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2)); renderer.setClearColor(0x0b0c10);
+canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); showErr('グラフィック（GPU）の描画が止まりました。Chrome をすべて閉じて開き直してください'); });
+const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(50, 1, .05, 300);
+const uniforms = { uNear: { value: 0 }, uTime: { value: 0 }, uSel: { value: -1 }, uHover: { value: -1 }, uPx: { value: 1 }, uMouse: { value: new THREE.Vector2(9, 9) },
+  uMouseOn: { value: 0 }, uAspect: { value: 1 }, uMask: { value: 15 }, uOverlap: { value: 0 }, uFlat: { value: 1 } };
+const mat = new THREE.ShaderMaterial({
+  uniforms,
+  vertexShader: `
+    attribute vec3 aColor; attribute float aKind; attribute float aInfo; attribute float aLm; attribute float aRnd; attribute float aBits; attribute float aDz;
+    uniform float uNear, uTime, uSel, uHover, uPx, uMouseOn, uAspect, uMask, uOverlap, uFlat; uniform vec2 uMouse;
+    varying vec3 vCol; varying float vKeep;
+    float bit(float v, float k) { return mod(floor(v / pow(2.0, k)), 2.0); }
+    void main() {
+      // Which members' scans: hide cells none of the selected members recorded.
+      float hit = 0.0, n = 0.0;
+      for (int k = 0; k < 4; k++) { float b = bit(aBits, float(k)); n += b; hit += b * bit(uMask, float(k)); }
+      if (hit < 0.5) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; vKeep = 0.0; return; }
+      bool coloured = aKind > 0.5 && aKind < 5.5;
+      float focus = uSel >= 0.0 ? uSel : uHover;
+      bool chosen = focus >= 0.0 && abs(aLm - focus) < 0.5;
+      float s = coloured ? 0.0 : smoothstep(0.0, 1.0, clamp(uNear * 1.7 - aRnd * 0.7, 0.0, 1.0));
+      float iso = (focus >= 0.0 && !chosen) ? 1.0 : 0.0;
+      vec3 dir = normalize(vec3(sin(aRnd * 41.0), 0.6 + 0.4 * cos(aRnd * 23.0), cos(aRnd * 17.0)));
+      vec3 drift = vec3(sin(uTime * .4 + aRnd * 30.0), cos(uTime * .33 + aRnd * 20.0), sin(uTime * .27 + aRnd * 10.0)) * .25;
+      vec3 p = position + vec3(0.0, aDz * uFlat, 0.0) + (dir * (1.5 + 4.0 * aRnd) + drift) * s;
+      vec4 mv = modelViewMatrix * vec4(p, 1.0);
+      vec4 clip = projectionMatrix * mv;
+      vec2 dm = clip.xy / clip.w - uMouse; dm.x *= uAspect;
+      // Magnifier: screen positions near the cursor are scaled up around it. The mapping is continuous and
+      // monotonic, so the neighbours are carried along (a bulge) instead of being pushed apart (a hole).
+      float lens = uMouseOn * exp(-dot(dm, dm) / 0.02);
+      vec2 mag = dm * (1.0 + 0.75 * lens); mag.x /= uAspect;
+      clip.xy = (uMouse + mag) * clip.w;
+      gl_Position = clip;
+      float base = coloured ? (0.026 + 0.03 * aInfo) * (1.0 + 0.6 * uNear) : 0.022 + 0.012 * aInfo;
+      if (chosen) base *= 1.35;
+      float size = base * (1.0 - s * 0.85) * (1.0 + 0.9 * lens);
+      // Points right next to the camera shrink away instead of filling the screen.
+      float nearFade = smoothstep(0.8, 3.0, -mv.z);
+      gl_PointSize = -mv.z < 0.5 ? 0.0 : min(size * nearFade * uPx / -mv.z, 16.0);
+      vKeep = 1.0 - s;
+      vec3 c = aColor;
+      if (uOverlap > 0.5) c = n < 1.5 ? vec3(.70, .80, .99) : n < 2.5 ? vec3(.42, .60, .99) : n < 3.5 ? vec3(.20, .42, .97) : vec3(.05, .22, .85);
+      if (iso > 0.5) c = mix(c, vec3(0.16, 0.17, 0.2), coloured ? 0.75 : 0.85);
+      if (!coloured && uOverlap < 0.5) c = mix(c, vec3(0.12, 0.13, 0.16), uNear * 0.6);
+      vCol = c;
+    }`,
+  fragmentShader: `
+    varying vec3 vCol; varying float vKeep;
+    void main() {
+      vec2 q = gl_PointCoord * 2.0 - 1.0; float d = dot(q, q);
+      if (d > 1.0 || vKeep < 0.04) discard;
+      gl_FragColor = vec4(vCol * (0.82 + 0.18 * (1.0 - d)), 1.0);
+    }`,
+});
+function cloud(A) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(A.pos, 3)); g.setAttribute('aColor', new THREE.BufferAttribute(A.col, 3));
+  g.setAttribute('aKind', new THREE.BufferAttribute(A.kind, 1)); g.setAttribute('aInfo', new THREE.BufferAttribute(A.info, 1));
+  g.setAttribute('aLm', new THREE.BufferAttribute(A.lm, 1)); g.setAttribute('aRnd', new THREE.BufferAttribute(A.rnd, 1));
+  g.setAttribute('aBits', new THREE.BufferAttribute(A.bits, 1)); g.setAttribute('aDz', new THREE.BufferAttribute(A.dz, 1));
+  const pts = new THREE.Points(g, mat); pts.frustumCulled = false; scene.add(pts); return pts;
+}
+cloud(D); const fillPts = cloud(F);
+
+// Camera follows the loop centre line: u (m along the loop) -> a point on the line and its direction.
+// The raw centre line is jagged (one floor median per 2° around the loop), so it is low-passed first:
+// treat it as a closed complex curve, keep only the first K Fourier terms, then sample a smooth closed spline
+// by arc length. Same loop, rounded corners, constant speed and a continuously turning direction.
+const raw = meta.line, n = raw.length, K = 4, smooth = [];
+const coef = [];
+for (let k = -K; k <= K; k++) {
+  let re = 0, im = 0;
+  for (let j = 0; j < n; j++) { const a = -2 * Math.PI * k * j / n, x = raw[j][0], y = raw[j][1]; re += x * Math.cos(a) - y * Math.sin(a); im += x * Math.sin(a) + y * Math.cos(a); }
+  coef.push([k, re / n, im / n]);
+}
+for (let j = 0; j < 96; j++) {
+  let x = 0, y = 0;
+  for (const [k, re, im] of coef) { const a = 2 * Math.PI * k * j / 96; x += re * Math.cos(a) - im * Math.sin(a); y += re * Math.sin(a) + im * Math.cos(a); }
+  smooth.push(new THREE.Vector3(x, 0, -y));
+}
+const curve = new THREE.CatmullRomCurve3(smooth, true, 'centripetal');
+const line = smooth;
+// u is metres along the loop as used by the data (LOOP); the curve is walked by the same fraction.
+function along(u) {
+  const f = (((u / LOOP) % 1) + 1) % 1;
+  return { p: curve.getPointAt(f), d: curve.getTangentAt(f).normalize() };
+}
+const centre = line.reduce((s, p) => s.add(p), new THREE.Vector3()).multiplyScalar(1 / line.length);
+const st = { u: 13, near: 0, nearT: 0, sel: -1, hover: -1, whole: false, wholeK: 0, mx: 0, my: 0, fly: null, zoom: 1, userZoom: 1, yaw: 0, mouseOn: 0 };
+const camPos = new THREE.Vector3(), camTgt = new THREE.Vector3();
+function camAt(first) {
+  // From behind and above the walker, looking a little ahead; looking slightly toward the outside of the loop.
+  const a = along(st.u), ahead = along(st.u + 2.5).p, k = st.wholeK, z = st.zoom * st.userZoom;
+  const out = a.p.clone().sub(centre).setY(0).normalize();
+  const back = a.d.clone().multiplyScalar(-5.2 * z).add(out.clone().multiplyScalar(-1.6 * z)).applyAxisAngle(new THREE.Vector3(0, 1, 0), st.yaw);
+  const p = a.p.clone().add(back).add(new THREE.Vector3(0, 3.6 * z, 0)), t = ahead.clone().add(new THREE.Vector3(0, .5, 0)).add(out.multiplyScalar(.6));
+  const fp = centre.clone().add(new THREE.Vector3(0, 19 * st.userZoom, 12 * st.userZoom)), ft = centre.clone();
+  const P = p.lerp(fp, k), T = t.lerp(ft, k);
+  if (first) { camPos.copy(P); camTgt.copy(T); } else { camPos.lerp(P, .15); camTgt.lerp(T, .15); }
+  camera.position.copy(camPos); camera.lookAt(camTgt);
+}
+function resize() { const r = stage.getBoundingClientRect(); renderer.setSize(r.width, r.height, false); camera.aspect = r.width / r.height; camera.updateProjectionMatrix(); uniforms.uAspect.value = camera.aspect; uniforms.uPx.value = r.height * renderer.getPixelRatio() / Math.tan(camera.fov * Math.PI / 360) / 2; }
+new ResizeObserver(resize).observe(stage);
+
+// Panel: objects
+const list = document.getElementById('list'), card = document.getElementById('card'), nearIn = document.getElementById('nearIn'), zoomIn = document.getElementById('zoomIn');
+LM.forEach((m, i) => {
+  const b = document.createElement('button'); b.id = 'lm-' + i;
+  b.innerHTML = `<i style="background:${lmHex[i]}"></i><span>${m.name}</span><small>${Math.round(m.u[0])}–${Math.round(m.u[1])} m</small>`;
+  b.onclick = () => select(i, true); list.append(b);
+});
+const who = (bits) => ['A', 'B', 'C', 'D'].filter((_, k) => bits & (1 << k)).join('・');
+function show(i) {
+  if (i < 0) { card.innerHTML = '<h2>ものにカーソルを当てる</h2><p>色のある物体にカーソルを当てると、それだけが浮かび上がります。クリックで固定、何もない所をクリックで解除。</p>'; return; }
+  const m = LM[i];
+  card.innerHTML = `<h2>${m.name} <small style="color:var(--muted);font-weight:400">${m.en}</small></h2><p>${m.note}</p><p>${m.area_m2} m² · 回廊の ${m.u[0]}–${m.u[1]} m · 記録：${who(m.members)}</p>` +
+    (i === 0 ? '<p class="key">★ 機械が「黄色＝目立つ」と数えても、人が目を留めるのは看板や表示かもしれない。色の情報量と注意は別のもの。</p>' : '');
+}
+function select(i, fly) {
+  st.sel = i; uniforms.uSel.value = i; show(i);
+  document.querySelectorAll('.list button').forEach((b, j) => b.setAttribute('aria-current', String(j === i)));
+  if (fly && i >= 0) { st.whole = i === 0; allBtn.textContent = st.whole ? '近くで見る' : '全体を見る'; if (i) st.fly = { from: st.u, to: (LM[i].u[0] + LM[i].u[1]) / 2, k: 0 }; }
+}
+show(-1);
+nearIn.oninput = () => { st.nearT = +nearIn.value; };
+zoomIn.oninput = () => { st.userZoom = 1 / +zoomIn.value; };
+const allBtn = document.getElementById('all');
+allBtn.onclick = () => { st.whole = !st.whole; allBtn.textContent = st.whole ? '近くで見る' : '全体を見る'; };
+document.getElementById('reset').onclick = () => { st.u = 13; st.nearT = 0; nearIn.value = 0; st.whole = false; allBtn.textContent = '全体を見る'; select(-1, false); setMem('all'); };
+const fillBtn = document.getElementById('fillBtn');
+fillBtn.onclick = () => { fillPts.visible = !fillPts.visible; uniforms.uFlat.value = fillPts.visible ? 1 : 0; fillBtn.setAttribute('aria-pressed', fillPts.visible); fillBtn.textContent = fillPts.visible ? '床の補完・平らに：オン' : '床の補完・平らに：オフ'; };
+
+// Members: everyone / one person / overlap.
+const legend = document.getElementById('legend'), memNote = document.getElementById('memNote');
+legend.innerHTML = [[.70, .80, .99], [.42, .60, .99], [.20, .42, .97], [.05, .22, .85]].map((c, j) => `<span><i style="background:rgb(${c.map(v => v * 255).join(',')})"></i>${j + 1}人</span>`).join('');
+function setMem(k) {
+  uniforms.uMask.value = k === 'all' || k === 'ov' ? 15 : 1 << k; uniforms.uOverlap.value = k === 'ov' ? 1 : 0; legend.hidden = k !== 'ov';
+  ['all', 0, 1, 2, 3, 'ov'].forEach(j => document.getElementById('m-' + j).setAttribute('aria-pressed', String(j === k)));
+  memNote.textContent = k === 'all' ? '4人のスキャンをすべて重ねて表示しています。' : k === 'ov' ? '何人のスキャンにその場所が記録されたか（濃いほど多い）。注視や関心の強さではありません。'
+    : `${'ABCD'[k]} さんのスキャンに記録された部分だけ（${meta.member_cells[k].toLocaleString()} 点）。`;
+}
+['all', 0, 1, 2, 3, 'ov'].forEach(j => { document.getElementById('m-' + j).onclick = () => setMem(j); });
+
+// Pointer: drag = walk around the loop, wheel = distance, hover = isolate + lens, click = fix.
+let drag = null; const tip = document.getElementById('tip'), v = new THREE.Vector3();
+canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, u: st.u, moved: false }; canvas.setPointerCapture(e.pointerId); st.fly = null; });
+canvas.addEventListener('pointermove', e => {
+  const r = canvas.getBoundingClientRect(); st.mx = (e.clientX - r.left) / r.width - .5; st.my = (e.clientY - r.top) / r.height - .5;
+  uniforms.uMouse.value.set(st.mx * 2, -st.my * 2); st.mouseOn = 1;
+  if (drag) { if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 4) drag.moved = true; tip.hidden = true; return; }
+  const h = hoverAt(e.clientX - r.left, e.clientY - r.top, r);
+  if (h !== st.hover) { st.hover = h; uniforms.uHover.value = h; if (st.sel < 0) show(h); }
+  if (h >= 0) { tip.textContent = LM[h].name; tip.hidden = false; tip.style.left = (e.clientX - r.left + 14) + 'px'; tip.style.top = (e.clientY - r.top - 30) + 'px'; } else tip.hidden = true;
+});
+canvas.addEventListener('pointerup', () => { if (drag && !drag.moved) select(st.hover, false); drag = null; canvas.classList.remove('drag'); });
+canvas.addEventListener('pointerleave', () => { st.mouseOn = 0; tip.hidden = true; st.hover = -1; uniforms.uHover.value = -1; if (st.sel < 0) show(-1); });
+canvas.addEventListener('wheel', e => { e.preventDefault(); st.nearT = Math.min(1, Math.max(0, st.nearT - e.deltaY * 0.0012)); nearIn.value = st.nearT; }, { passive: false });
+function hoverAt(x, y, r) {
+  let best = -1, bd = 22;
+  for (let l = 0; l < LM.length; l++) for (const i of pick[l]) {
+    if (!((D.bits[i] & uniforms.uMask.value))) continue;
+    v.set(D.pos[i * 3], D.pos[i * 3 + 1], D.pos[i * 3 + 2]).project(camera);
+    if (v.z > 1) continue;
+    const d = Math.hypot((v.x + 1) / 2 * r.width - x, (1 - v.y) / 2 * r.height - y);
+    if (d < bd) { bd = d; best = l; }
+  }
+  return best;
+}
+document.getElementById('len').textContent = `一周 ${LOOP.toFixed(0)} m`;
+const track = document.getElementById('track');
+LM.slice(1).forEach(m => { const b = document.createElement('b'); b.style.left = ((m.u[0] + m.u[1]) / 2 / LOOP * 100) + '%'; b.title = m.name; track.append(b); });
+
+// Camera + hands (same module and models as the street page).
+const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const HAND_MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+const camSel = document.getElementById('camSel'), camBtn = document.getElementById('camBtn'), camMsg = document.getElementById('camMsg');
+const prev = document.getElementById('prev'), pctx = prev.getContext('2d'), sens = document.getElementById('sens');
+const video = document.createElement('video'); video.muted = true; video.playsInline = true;
+const gest = createGestureState(); let handDet = null, stream = null, lastVT = -1, lastHands = [];
+async function listCams() {
+  try {
+    const cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+    camSel.innerHTML = cams.length ? '' : '<option value="">カメラが見つかりません</option>';
+    cams.forEach((d, i) => camSel.append(new Option(d.label || `カメラ ${i + 1}`, d.deviceId)));
+  } catch { camMsg.textContent = 'カメラの一覧を取得できません。'; }
+}
+async function startCam() {
+  camBtn.disabled = true; camMsg.textContent = '準備中…（初回は手の認識モデルを読み込みます）';
+  try {
+    if (!handDet) {
+      const { FilesetResolver, HandLandmarker } = await import(MP + '/vision_bundle.mjs');
+      const fs = await FilesetResolver.forVisionTasks(MP + '/wasm');
+      const make = d => HandLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: HAND_MODEL, delegate: d }, runningMode: 'VIDEO', numHands: 2, minHandDetectionConfidence: .3, minHandPresenceConfidence: .3, minTrackingConfidence: .3 });
+      try { handDet = await make('GPU'); } catch { handDet = await make('CPU'); }
+    }
+    stream?.getTracks().forEach(t => t.stop());
+    stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: camSel.value ? { exact: camSel.value } : undefined, width: { ideal: 960 }, height: { ideal: 540 } }, audio: false });
+    video.srcObject = stream; await video.play(); prev.hidden = false; await listCams();
+    camMsg.textContent = '手をカメラに向けてください。最初に一度、指を大きく開いて、ぎゅっとつまむと範囲が合います。';
+    camBtn.textContent = 'カメラ停止';
+  } catch (e) {
+    camMsg.textContent = e.name === 'NotAllowedError' ? 'カメラが拒否されました。アドレスバー左のアイコンからカメラを「許可」にして、再読み込みしてください。' : 'カメラを開けませんでした：' + (e.message || e.name);
+  }
+  camBtn.disabled = false;
+}
+function stopCam() { stream?.getTracks().forEach(t => t.stop()); stream = null; prev.hidden = true; camBtn.textContent = 'カメラ開始'; gest.hands = []; st.zoom = 1; st.yaw = 0; }
+camBtn.onclick = () => (stream ? stopCam() : startCam());
+listCams();
+function senseHands(now) {
+  if (!stream || !handDet || video.readyState < 2 || video.currentTime === lastVT) return;
+  lastVT = video.currentTime;
+  lastHands = handDet.detectForVideo(video, now).landmarks || [];
+  const o = updateGestures(gest, lastHands, now, { sensitivity: +sens.value, walk: .6 });
+  if (o.scatter != null) { st.nearT = o.scatter; nearIn.value = o.scatter; }
+  st.zoom = o.zoom; st.yaw = o.yaw; if (o.du) { st.fly = null; st.u += o.du; }
+  drawPreview(pctx, video, lastHands, gest);
+}
+window.__test = { st, uniforms, setMem, along, D, raw: meta.line, LOOP };
+
+const ROUTE = LOOP;
+// Route bar: drag the bar to move along the route; play walks it slowly. The 3D view itself never moves the route.
+const scrub = document.getElementById('scrub'), playBtn = document.getElementById('play'), speedSel = document.getElementById('speed');
+let scrubbing = false;
+const scrubTo = (e) => { const r = scrub.getBoundingClientRect(); st.fly = null; st.u = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * ROUTE; };
+scrub.addEventListener('pointerdown', e => { scrubbing = true; scrub.setPointerCapture(e.pointerId); scrubTo(e); });
+scrub.addEventListener('pointermove', e => { if (scrubbing) scrubTo(e); });
+scrub.addEventListener('pointerup', () => { scrubbing = false; });
+playBtn.onclick = () => { st.playing = !st.playing; playBtn.textContent = st.playing ? '❚❚' : '▶'; playBtn.setAttribute('aria-label', st.playing ? '一時停止' : '再生'); };
+const ease = t => t * t * (3 - 2 * t);
+// Optional start state from the address (?u=20&near=.8&whole&mem=ov|0..3), handy for checking views.
+const qp = new URLSearchParams(location.search);
+if (qp.get('u')) st.u = +qp.get('u'); if (qp.get('near')) st.near = st.nearT = +qp.get('near');
+if (qp.get('mouse')) { const [mx, my] = qp.get('mouse').split(',').map(Number); uniforms.uMouse.value.set(mx, my); st.mouseOn = 1; uniforms.uMouseOn.value = 1; }
+if (qp.has('whole')) { st.whole = true; st.wholeK = 1; } if (qp.get('mem')) setMem(qp.get('mem') === 'ov' ? 'ov' : +qp.get('mem'));
+camAt(true);
+document.getElementById('msg').hidden = true;
+renderer.setAnimationLoop(t => {
+  const dt = Math.min(.05, (t - (st.lastT ?? t)) / 1000); st.lastT = t;
+  if (st.playing && !scrubbing) { st.fly = null; st.u += dt * +speedSel.value; if (st.u > ROUTE) st.u -= ROUTE; }
+  senseHands(t);
+  uniforms.uMouseOn.value += (st.mouseOn - uniforms.uMouseOn.value) * .12;
+  st.near += (st.nearT - st.near) * .08; uniforms.uNear.value = st.near; uniforms.uTime.value = t / 1000;
+  st.wholeK += ((st.whole ? 1 : 0) - st.wholeK) * .06;
+  if (st.fly) { st.fly.k = Math.min(1, st.fly.k + .02); st.u = st.fly.from + (st.fly.to - st.fly.from) * ease(st.fly.k); if (st.fly.k >= 1) st.fly = null; }
+  camAt(false); renderer.render(scene, camera);
+  const uu = ((st.u % LOOP) + LOOP) % LOOP;
+  document.getElementById('dot').style.left = (uu / LOOP * 100) + '%'; document.getElementById('pos').textContent = `${uu.toFixed(0)} m`;
+  document.getElementById('nearMark').style.left = (st.near * 100) + '%';
+});
+</script>
+</body>
+</html>
